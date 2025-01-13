@@ -6,15 +6,19 @@ As there is no good replacement for `brctl` in the iproute2 aera,
 this tool aims to provide a similar user-friendly output.
 
 ```
- bridge name | bridge type | bridge id              | bridge MAC        | STP enabled | interfaces
--------------+-------------+------------------------+-------------------+-------------+------------
- br0         | bridge      | 8000.01:02:03:04:05:ab | 01:02:03:04:05:ab | no          | eth0
-             |             |                        |                   |             | eth1
- ovs-system  | openvswitch |                        | 52:a2:f7:f7:ef:7c |             | tap1
-             |             |                        |                   |             | tap2
-             |             |                        |                   |             | tap3
-             |             |                        |                   |             | tap4
-             |             |                        |                   |             | tap5
+ name | type   | bridge id              | bridge MAC        | STP | interfaces
+------+--------+------------------------+-------------------+-----+------------
+ br0  | bridge | 8000.a1:b2:c3:d4:e5:f6 | a1:b2:c3:d4:e5:f6 | no  | eth0
+ br1  | ovs    | 8000.26:90:93:19:73:46 | 26:90:93:19:73:46 | yes | tap1
+      |        |                        |                   |     | tap2
+      |        |                        |                   |     | tap3
+      |        |                        |                   |     | tap4
+      |        |                        |                   |     | tap5
+      |        |                        |                   |     | tap6
+      |        |                        |                   |     | tap7
+      |        |                        |                   |     | tap8
+      |        |                        |                   |     | tap9
+ br2  | bridge | 8000.62:96:9a:b6:94:30 | 62:96:9a:b6:94:30 | no  |
 ```
 
 
