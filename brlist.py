@@ -66,35 +66,100 @@ def print_table(headers, rows, separator='|', outer_space=True, limit_col=None, 
 
 
 def get_bridges_info():
-    bridges = {}
+    bridges = []
     s = subprocess.check_output(["ip", "-d", "-json", "link", "show"])
     interfaces = json.loads(s)
+    linux_bridges = {}
+    ovs_bridges = {}
+    ovs_interfaces = {}
     for interface in interfaces:
         if not 'master' in interface:
+            # if interface has no master it IS a master
+            if interface.get('linkinfo', {}).get('info_kind') == 'openvswitch':
+                # openvswitch bridge master
+                ovs_bridges[interface['ifname']] = {
+                    "mac": interface['address'],
+                    "index": interface['ifindex']
+                }
             continue
-        if not interface['master'] in bridges:
-            bridges[interface['master']] = {'interfaces': []}
-        bridges[interface['master']]['interfaces'].append(interface['ifname'])
 
+        # now get the slaves
+        if interface['linkinfo']['info_slave_kind'] == 'bridge':
+            # linux bridge slave
+            if not interface['master'] in linux_bridges:
+                linux_bridges[interface['master']] = {'interfaces': []}
+            linux_bridges[interface['master']]['interfaces'].append(interface['ifname'])
+        elif interface['linkinfo']['info_slave_kind'] == 'openvswitch':
+            # openvswitch bride slave
+            ovs_interfaces[interface['ifname']] = {"ifname": interface['ifname'], "index": interface['ifindex']}
+
+    # iterate linux bridge masters
     for interface in interfaces:
-        if not interface['ifname'] in bridges.keys():
+        if not interface['ifname'] in linux_bridges.keys():
             continue
-        #print(interface)
-        bridge_type = interface['linkinfo']['info_kind']
-        bridges[interface['ifname']]['bridge_type'] = bridge_type
-        bridges[interface['ifname']]['mac'] = interface['address']
-        if bridge_type == 'bridge':
-            bridges[interface['ifname']]['bridge_id'] = interface['linkinfo']['info_data']['bridge_id']
-            bridges[interface['ifname']]['stp'] = "yes" if interface['linkinfo']['info_data']['stp_state'] else "no"
+
+        # normalize bridge id
+        bridge_id = interface['linkinfo']['info_data']['bridge_id']
+        prio, _ = bridge_id.split('.')
+        prio = int(prio, 16)
+        bridge_id = f"{prio:04x}.{interface['address']}"
+
+        br = {
+            "ifname": interface['ifname'],
+            "index": interface['ifindex'],
+            "bridge_type": interface['linkinfo']['info_kind'],
+            "mac": interface['address'],
+            "bridge_id": bridge_id,
+            "stp": "yes" if interface['linkinfo']['info_data']['stp_state'] else "no",
+            "interfaces": linux_bridges[interface['ifname']]['interfaces']
+        }
+        bridges.append(br)
+
+
+    # openvswitch doesn't report the master<-->slave mapping via iproute2 so let's ask directly
+    try:
+        ovs_bridges_list = subprocess.check_output(["ovs-vsctl", "list-br"]).decode().strip().split("\n")
+    except:
+        # ovs is not installed or running
+        ovs_bridges_list = []
+    for bridge in ovs_bridges_list:
+        stp = subprocess.check_output(["ovs-vsctl", "get", "bridge", bridge, "stp_enable"]).decode().strip() == "true"
+        rstp = subprocess.check_output(["ovs-vsctl", "get", "bridge", bridge, "rstp_enable"]).decode().strip() == "true"
+        if stp:
+            bridge_id = subprocess.check_output(["ovs-vsctl", "get", "bridge", bridge, "status:stp_bridge_id"]).decode().strip().strip('"').replace('.', '')
+        elif rstp:
+            bridge_id = subprocess.check_output(["ovs-vsctl", "get", "bridge", bridge, "rstp_status:rstp_bridge_id"]).decode().strip().strip('"').replace('.', '')
         else:
-            bridges[interface['ifname']]['bridge_id'] = ""
-            bridges[interface['ifname']]['stp'] = ""
-    return bridges
+            bridge_id = ""
+        if bridge_id and len(bridge_id) == 16:
+            s = bridge_id
+            bridge_id = f"{s[0:4]}.{s[4:6]}:{s[6:8]}:{s[8:10]}:{s[10:12]}:{s[12:14]}:{s[14:16]}"
+
+        slaves = []
+        # TODO: include all interfaces (like ovs internal gre) on cli flag
+        for interface in subprocess.check_output(["ovs-vsctl", "list-ports", bridge]).decode().strip().split("\n"):
+            TODO_CMD_FLAG_ALL_OVS_IFS = False
+            if interface in ovs_interfaces:
+                slaves.append(ovs_interfaces[interface])
+            elif TODO_CMD_FLAG_ALL_OVS_IFS:
+                slaves.append({"ifname": interface, "index": 999})
+        interfaces = [e['ifname'] for e in sorted(slaves, key=lambda e: e['index'])]
+
+        br = {
+            "ifname": bridge,
+            "bridge_type": "ovs",
+            "bridge_id": bridge_id,
+            "stp": "yes" if (stp or rstp) else "no",
+            "interfaces": interfaces
+        }
+        br.update(ovs_bridges[bridge]) # fill in mac and ifindex
+        bridges.append(br)
+    return sorted(bridges, key=lambda e: e['index'])
 
 
 rows = []
-for ifname, br in get_bridges_info().items():
-    if len(sys.argv) > 1 and ifname not in sys.argv[1:]:
+for br in get_bridges_info():
+    if len(sys.argv) > 1 and br['ifname'] not in sys.argv[1:]:
         continue
-    rows.append([ifname, br['bridge_type'], br['bridge_id'], br['mac'], br['stp'], br['interfaces']])
-print_table(["bridge name", "bridge type", "bridge id", "bridge MAC", "STP enabled", "interfaces"], rows, limit_col=2)
+    rows.append([br['ifname'], br['bridge_type'], br['bridge_id'], br['mac'], br['stp'], br['interfaces']])
+print_table(["name", "type", "bridge id", "bridge MAC", "STP", "interfaces"], rows, limit_col=2)
