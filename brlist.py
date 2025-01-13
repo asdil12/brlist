@@ -29,9 +29,9 @@ def print_row(col_lens, row, separator='|', space=' ', outer_space=True, limit_c
                     #print(extra_row)
                     extra_rows.append(extra_row)
                     #print(extra_rows)
-                col = col[0]
+                col = col[0] if col else ''
             if limit_col == i and len(col) > limit_col_max_len:
-                col = col[:limit_col_max_len-1] + '�[m~@'
+                col = col[:limit_col_max_len-1] + '…'
             if limit_col == i:
                 row_normalized.append(col.ljust(limit_col_max_len, space))
             else:
@@ -49,6 +49,8 @@ def get_col_len(col):
         Returns len of col if col is str - else max col len
     """
     if isinstance(col, list):
+        if not col:
+            return 0
         return max(map(len, col))
     else:
         return len(col)
@@ -75,7 +77,12 @@ def get_bridges_info():
     for interface in interfaces:
         if not 'master' in interface:
             # if interface has no master it IS a master
-            if interface.get('linkinfo', {}).get('info_kind') == 'openvswitch':
+            if interface.get('linkinfo', {}).get('info_kind') == 'bridge':
+                # linux bridge master
+                if not interface['ifname'] in linux_bridges.keys():
+                    # this ensures that bridges with no slaves will still be listed
+                    linux_bridges[interface['ifname']] = {'interfaces': []}
+            elif interface.get('linkinfo', {}).get('info_kind') == 'openvswitch':
                 # openvswitch bridge master
                 ovs_bridges[interface['ifname']] = {
                     "mac": interface['address'],
